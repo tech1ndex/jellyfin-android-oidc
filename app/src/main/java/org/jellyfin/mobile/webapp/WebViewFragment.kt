@@ -66,6 +66,7 @@ class WebViewFragment : Fragment(), BackPressInterceptor, JellyfinWebChromeClien
         private set
     private lateinit var ssoNavigation: SsoNavigation
     private var signInView: WebView? = null
+    private var checkedSsoSession = false
     private var retriedCachedWebapp = false
     private var connected = false
     private val timeoutRunnable = Runnable {
@@ -237,7 +238,8 @@ class WebViewFragment : Fragment(), BackPressInterceptor, JellyfinWebChromeClien
         addJavascriptInterface(externalPlayer, "ExternalPlayer")
         addJavascriptInterface(mediaSegments, "MediaSegments")
 
-        loadWebapp("${server.hostname.trimEnd('/')}/")
+        checkedSsoSession = false
+        loadWebapp(ssoNavigation.serverRoot)
     }
 
     private fun WebView.loadWebapp(url: String) {
@@ -247,8 +249,8 @@ class WebViewFragment : Fragment(), BackPressInterceptor, JellyfinWebChromeClien
         postDelayed(showLoadingContainerRunnable, Constants.SHOW_PROGRESS_BAR_DELAY)
     }
 
-    private fun routeSignIn(view: WebView, url: String): Boolean {
-        if (!ssoNavigation.shouldStart(url, view.url.orEmpty())) return false
+    private fun routeSignIn(view: WebView, signInUrl: String): Boolean {
+        if (!ssoNavigation.shouldStart(signInUrl, view.url.orEmpty())) return false
         val binding = webViewBinding ?: return true
         if (signInView != null) return true
 
@@ -264,17 +266,31 @@ class WebViewFragment : Fragment(), BackPressInterceptor, JellyfinWebChromeClien
         login.settings.setSupportMultipleWindows(false)
         login.settings.allowFileAccess = false
         login.settings.allowContentAccess = false
+        var checkingSession = !connected && !checkedSsoSession
         login.webViewClient = object : WebViewClient() {
             // onPageStarted only observes top-level loads. The plugin also loads this same
             // index in a hidden iframe while it prepares jellyfin_credentials.
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-                if (signInView !== view || !ssoNavigation.isWebIndex(url)) return
+                if (signInView !== view) return
+                if (checkingSession && url == "about:blank#sign-in") {
+                    checkingSession = false
+                    login.loadUrl(signInUrl)
+                    return
+                }
+                if (!ssoNavigation.isWebIndex(url)) return
                 closeSignIn()
                 connected = false
                 binding.webView.loadWebapp(ssoNavigation.webIndex)
             }
         }
-        login.loadUrl(url)
+        if (checkingSession) {
+            checkedSsoSession = true
+            // Use Jellyfin Web's own origin and storage in the bridge-free WebView.
+            val page = resources.assets.open("restore-sso-session.html").bufferedReader().use { it.readText() }
+            login.loadDataWithBaseURL(ssoNavigation.serverRoot, page, "text/html", "utf-8", null)
+        } else {
+            login.loadUrl(signInUrl)
+        }
         return true
     }
 

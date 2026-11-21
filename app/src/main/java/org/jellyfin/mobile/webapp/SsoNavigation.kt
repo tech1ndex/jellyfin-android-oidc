@@ -9,6 +9,7 @@ internal class SsoNavigation(serverUrl: String) {
     private val server = (serverUrl.trimEnd('/') + "/").toHttpUrl()
     private val pluginPath = server.encodedPath + "sso/OID/"
     private val index = server.newBuilder().addPathSegments("web/index.html").build()
+    val serverRoot = server.toString()
     val webIndex = index.toString()
 
     private fun sameOrigin(url: HttpUrl) =
