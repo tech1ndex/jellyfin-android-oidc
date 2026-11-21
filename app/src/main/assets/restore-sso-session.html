@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<script>
+    // This page runs only when startup would otherwise navigate to the SSO provider.
+    async function hasSavedSession() {
+        const credentials = JSON.parse(localStorage.getItem("jellyfin_credentials"));
+        const server = credentials?.Servers?.[0];
+        if (!server?.Id || !server.UserId || !server.AccessToken || localStorage.getItem("enableAutoLogin") === "false") {
+            return false;
+        }
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        try {
+            const options = {
+                cache: "no-store",
+                redirect: "error",
+                mode: "same-origin",
+                signal: controller.signal
+            };
+            // Web storage is shared by installations on different paths of the same origin.
+            const info = await fetch(new URL("System/Info/Public", document.baseURI), options);
+            if (!info.ok || (await info.json()).Id !== server.Id) return false;
+            const response = await fetch(new URL("Users/Me", document.baseURI), {
+                ...options,
+                headers: { Authorization: `MediaBrowser Token="${encodeURIComponent(server.AccessToken)}"` }
+            });
+            if (!response.ok) return false;
+            const user = await response.json();
+            return user.Id === server.UserId && user.ServerId === server.Id;
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    hasSavedSession().catch(() => false).then(valid => {
+        location.replace(valid ? new URL("web/index.html", document.baseURI) : "about:blank#sign-in");
+    });
+</script>
